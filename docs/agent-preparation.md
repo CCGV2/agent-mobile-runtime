@@ -1,10 +1,12 @@
 # Prepare a phone for the current task
 
-Use this playbook when a user asks you to prepare an Android phone, including a
-preparation request sent from Pax Console. This is a normal Agent task: read the
-instructions, prepare the environment on the assigned node, and report progress
-in the conversation. Console does not install the SDK or wait for Android to
-finish booting through a long HTTP request.
+Use this playbook after a user sends a request to prepare an Android phone.
+Pax Console can add these instructions to the current chat composer as an
+editable draft. The user reviews, edits and sends that draft; clicking the
+preparation button does not send a message or start Agent work. Once sent,
+this is a normal Agent task: read the instructions, prepare the environment on
+the assigned node, and report progress in the conversation. Console does not
+install the SDK or wait for Android boot through a long HTTP request.
 
 ## Read and inspect first
 
@@ -124,5 +126,5 @@ Report the actual device ID, config path and remaining blockers, without
 credential contents. If requested, provide a real Settings screenshot; do not
 substitute a mock phone image. An audio track alone is not non-silent audio
 acceptance, and existing Intel macOS results do not establish Linux or Apple
-Silicon device/media acceptance. Never report readiness merely because the
-Console accepted the preparation message.
+Silicon device/media acceptance. Neither adding a chat draft nor accepting the
+eventual message establishes Android readiness.

@@ -5,11 +5,12 @@ inspection, app input, or recordings of internal audio and screen. It is
 independent of Pax. Start here; read [AGENTS.md](../AGENTS.md) for the task-to-doc
 index and [SECURITY.md](../SECURITY.md) for the boundary.
 
-For a user or Console request to prepare a phone, follow the
+After the user sends a phone-preparation request, follow the
 [Agent preparation playbook](agent-preparation.md). The Agent owns dependency
-checks and Android startup; Console sends a normal preparation message and
-then observes the runtime, rather than running an installer or waiting for
-boot through a long HTTP request.
+checks and Android startup. Console can put preparation instructions in the
+current chat draft; the user reviews, edits and sends them through the normal
+conversation flow. The button itself does not send a message, install tools or
+start Android. Console then observes the runtime without a long boot request.
 
 ## 1. Get the runtime and choose an installation route
 
