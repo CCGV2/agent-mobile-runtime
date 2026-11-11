@@ -181,7 +181,7 @@ async function privateDirectory(directory) {
   await fs.chmod(directory, 0o700);
 }
 
-async function claimRoot(directory) {
+async function claimRoot(directory, kind = 'agent-mobile-linux-setup') {
   let ancestor = path.parse(directory).root;
   for (const component of path.relative(ancestor, path.dirname(directory)).split(path.sep).filter(Boolean)) {
     ancestor = path.join(ancestor, component);
@@ -201,7 +201,7 @@ async function claimRoot(directory) {
     throw new Error('Refusing to modify a nonempty setup root; use a fresh private directory.');
   }
   await fs.chmod(directory, 0o700);
-  await fs.writeFile(path.join(directory, 'setup-owner.json'), JSON.stringify({schema: 1, kind: 'agent-mobile-linux-setup'})+'\n', {flag: 'wx', mode: 0o600});
+  await fs.writeFile(path.join(directory, 'setup-owner.json'), JSON.stringify({schema: 1, kind})+'\n', {flag: 'wx', mode: 0o600});
   return fs.realpath(directory);
 }
 
@@ -422,4 +422,5 @@ if (require.main === module) main().then(result => process.stdout.write(JSON.str
   process.stderr.write(`${error.message}\n`); process.exitCode = 1;
 });
 
-module.exports = {main, parse, plan, validateDownloadURL, download, digest, environment, normalizeAVDConfig, EXTRACT, MANIFEST};
+module.exports = {main, parse, plan, validateDownloadURL, download, digest, environment, normalizeAVDConfig, EXTRACT, MANIFEST,
+  execute, resolveExecutable, claimRoot, privateDirectory, protectTree};

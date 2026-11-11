@@ -2,6 +2,19 @@
 
 给 AI Agent 使用的独立 Android 虚拟手机运行时。管理原生 Android Emulator 的生命周期，通过 STDIO MCP 操作 App，并录制内部声音及屏幕。提供本地管理 API，供 paxd 接入；不依赖 Pax，也不修改其他仓库。
 
+**让 Agent 安装和使用：从 [AGENTS.md](AGENTS.md) 开始，按 [首次安装与 MCP 接入](docs/quickstart.md) 执行。**
+英文阅读索引见 [llms.txt](llms.txt)。无需先通读源码，也没有 npm 包依赖要安装。
+
+| 你需要的能力 | 从哪里开始 |
+| --- | --- |
+| 安装、创建第一台手机、给 Agent 接入 MCP | [Quickstart](docs/quickstart.md)；统一入口 `node scripts/setup.cjs --help` |
+| Linux 私有 SDK 安装、KVM 和部署检查 | [Linux](docs/linux.md) |
+| macOS SDK、独立模板和配置准备 | [macOS](docs/macos.md) |
+| Agent 操作 App、截图、读取 UI、录音录像 | [Quickstart 的 MCP 使用流程](docs/quickstart.md) |
+| 人工查看实时画面与内部声音 | [WebRTC](docs/webrtc.md) |
+| 接到自己的前端或 Pax 节点 | [本地 API / Pax 接入协议](docs/pax-api.md) |
+| 分清已经测过的能力和安全边界 | [验收记录](docs/acceptance.md)、[SECURITY.md](SECURITY.md) |
+
 **当前是第一版实现，不是恶意 APK 沙箱。** 独立的数据目录、设备凭证和工具范围已经实现；新增的 WebRTC 默认关闭，只允许本机、只传音视频。宿主机/局域网防火墙、Pax 远程 WebRTC、完整 Docker 部署和 iOS 后端尚未实现。不要把未知恶意软件直接放到日常电脑上运行。详见 [安全边界](SECURITY.md)。
 
 ## 已实现
@@ -39,7 +52,7 @@ Linux ARM、继承用户桌面/声音会话、以及跨容器的本机 WebRTC �
 ## 快速使用
 
 1. 用 Android SDK 的 AVD Manager / `avdmanager` **新建专用、没有账号的模板**。保持模板关闭；推荐使用未启动过的干净 AVD。模板中的内容都会复制给新设备，不要选择日常使用的模拟器。快照和 qcow2 运行状态不继承。
-2. 复制 [examples/config.json](examples/config.json) 到自己的配置文件，替换所有绝对路径。`templates.clean.avdDir` 指向该专用 `.avd` 目录，不是 `.ini` 文件。系统镜像应仍位于所配置 SDK 中。
+2. 优先使用 [Quickstart](docs/quickstart.md) 的安装入口创建专用模板和配置。如果手工复制 [examples/config.json](examples/config.json)，替换所有绝对路径；`templates.clean35.avdDir` 指向专用 `.avd` 目录，不是 `.ini` 文件。SDK 22 生成的新模板可能含占位路径，使用安装入口规范化自己的新模板；不要关闭模板校验。
 3. 检查依赖并启动服务：
 
 ```sh
@@ -52,12 +65,18 @@ node bin/agent-mobile.cjs --config /absolute/config.json serve
 另开终端创建、启动设备。下面的 `SESSION_ID` 用创建结果中的 `id` 替换：
 
 ```sh
-node bin/agent-mobile.cjs --config /absolute/config.json session create --template clean --key my-task
+node bin/agent-mobile.cjs --config /absolute/config.json session create --template clean35 --key my-task
 node bin/agent-mobile.cjs --config /absolute/config.json session start SESSION_ID
 node bin/agent-mobile.cjs --config /absolute/config.json install SESSION_ID --apk /absolute/app.apk
 ```
 
-创建结果里的 `credentialFile` 是给 MCP 进程读取的私有文件路径，**不是让模型读取其内容**。参考 [examples/mcp.json](examples/mcp.json)，将启动命令与 `AGENT_MOBILE_SESSION_FILE` 加到 MCP 客户端。一个 MCP 连接固定绑定该会话，没有任意切换设备的工具。
+创建结果里的 `credentialFile` 是给 MCP 进程读取的私有文件路径，**不是让模型读取其内容**。运行下面的命令生成可合并到 MCP 客户端的配置（绝对 Node 路径、CLI 路径及凭证文件引用，不含 token），合并时保留客户端已有的配置：
+
+```sh
+node bin/agent-mobile.cjs --config /absolute/config.json mcp-config SESSION_ID
+```
+
+手工配置参考 [examples/mcp.json](examples/mcp.json)。一个 MCP 连接固定绑定该会话，没有任意切换设备的工具。
 
 普通 Agent 会话与管理员共享同一个 OS 用户时，这些权限不是防止 Agent 通过 shell 绕过的安全边界。需要限制 Agent 的宿主 shell/文件访问，或使用独立服务账号/远程机器。
 

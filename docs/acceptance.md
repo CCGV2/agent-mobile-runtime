@@ -43,6 +43,18 @@ resource contention produced a transient System UI ANR, which was dismissed and
 checked absent. Multi-emulator performance under heavy host load and arbitrary
 third-party App compatibility remain unverified.
 
+Agent onboarding was additionally checked on 2026-11-11. The unified setup
+entry prepared a new private Android 35 template and configuration from an
+installed SDK on Intel macOS; the separate doctor returned `ready:true`, and
+plan mode left no installation directory. This preparation did not start a
+device or rerun the full Android/media acceptance. SDK 22 ignores a different
+SDK selected through Android environment variables when `avdmanager` belongs
+to another SDK: the bootstrap now rejects that mismatch before writing and
+uses the selected SDK's own command-line tools. The generated MCP fragment
+also started a real STDIO process, initialized and listed tools with a minimal
+GUI-style PATH, without embedding a token. The complete Node suite passed
+191 tests, including the new setup and credential/config checks.
+
 Linux setup and compatibility verification are recorded separately in
 [linux.md](linux.md). Linux SDK preparation, Node/Python tests and synthetic
 Chromium media have been exercised in an isolated Linux container. That

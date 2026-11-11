@@ -12,6 +12,7 @@
   "engines": { "node": ">=22" },
   "bin": { "agent-mobile": "bin/agent-mobile.cjs" },
   "scripts": {
+    "setup": "node scripts/setup.cjs",
     "test": "node --test test/*.test.cjs",
     "doctor": "node bin/agent-mobile.cjs doctor",
     "start": "node bin/agent-mobile.cjs serve",

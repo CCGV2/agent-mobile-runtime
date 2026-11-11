@@ -42,7 +42,7 @@ model prompts, ACP history or audit events.
 | --- | --- |
 | `GET /health` | Unauthenticated readiness/protocol version only |
 | `GET /v1/admin/templates` | Safe names and availability, no template paths |
-| `POST /v1/admin/sessions` | `{template:"clean",key?:"opaque-pax-session-key"}` → public session + node-only `credentialFile` |
+| `POST /v1/admin/sessions` | `{template:"clean35",key?:"opaque-pax-session-key"}` → public session + node-only `credentialFile` (use the configured template name) |
 | `GET /v1/admin/sessions` | Public session metadata |
 | `GET /v1/admin/sessions/:id/state` | State and capability flags |
 | `POST /v1/admin/sessions/:id/action` | `{action,args:{...}}` |

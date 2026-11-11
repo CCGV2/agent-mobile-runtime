@@ -3,7 +3,7 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const {loadConfig} = require('../src/config.cjs');
+const {loadConfig, configPath} = require('../src/config.cjs');
 const {readPrivate} = require('../src/storage.cjs');
 const {AndroidBackend} = require('../src/android.cjs');
 const {Provisioner} = require('../src/provision.cjs');
@@ -17,6 +17,7 @@ const {execFile} = require('node:child_process');
 const {promisify} = require('node:util');
 const {WebRTCManager} = require('../src/webrtc.cjs');
 const {resolveEmulatorGrpc} = require('../src/emulator-grpc.cjs');
+const {createMCPConfig} = require('../src/mcp-config.cjs');
 
 const HELP = `agent-mobile-runtime (Node.js 22+)
 
@@ -33,10 +34,12 @@ const HELP = `agent-mobile-runtime (Node.js 22+)
   agent-mobile [--config ...] record stop ID --id RECORDING_ID
   agent-mobile [--config ...] record list ID
   agent-mobile [--config ...] mcp
+  agent-mobile [--config ...] mcp-config SESSION_ID
 
 MCP requires AGENT_MOBILE_SESSION_FILE from operator session creation.
 No credential contents are printed. No Android SDK is downloaded automatically.
-See README.md and docs/pax-api.md for configuration and integration.
+MCP config prints a mergeable JSON fragment with absolute paths, never tokens.
+See AGENTS.md and docs/quickstart.md for installation and first use.
 `;
 
 function parse(argv) {
@@ -83,6 +86,12 @@ async function main(argv = process.argv.slice(2)) {
   const {words, options} = parse(argv);
   const config = await loadConfig(options.config);
   const [command, sub, rawID] = words;
+  if (command === 'mcp-config') {
+    if (words.length !== 2) throw new Error('Use mcp-config SESSION_ID.');
+    const fragment = await createMCPConfig({config, configFile: options.config || configPath(), sessionId: sub});
+    process.stdout.write(JSON.stringify(fragment, null, 2)+'\n');
+    return;
+  }
   if (command === 'doctor') {
     const report = await doctor(config, new Provisioner({config}));
     process.stdout.write(JSON.stringify(report, null, 2) + '\n');

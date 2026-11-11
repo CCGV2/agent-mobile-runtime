@@ -1,0 +1,17 @@
+# agent-mobile-runtime
+
+> Session-owned Android emulators for AI agents: lifecycle, UI inspection/input,
+> internal audio/video recording, STDIO MCP and optional restricted local WebRTC.
+> Standalone; no npm third-party dependencies. Start with the quickstart.
+
+- [Agent quickstart](docs/quickstart.md): Clone, choose an OS setup route, check readiness, create a device and generate its MCP client entry.
+- [Agent instructions](AGENTS.md): Task-to-doc index, device-use rules and contributor checks.
+- [README](README.md): Capabilities, operator CLI and limitations.
+- [Linux setup](docs/linux.md): Explicit private SDK install, KVM and deployment checks.
+- [macOS setup](docs/macos.md): Prepare a clean template using an existing SDK.
+- [WebRTC](docs/webrtc.md): Optional same-host live video/audio and its enforced policy.
+- [Integration protocol](docs/pax-api.md): Versioned local API and trusted Pax/node integration.
+- [Acceptance record](docs/acceptance.md): Real Intel macOS results and unverified deployment scope.
+- [Security](SECURITY.md): Private-device guarantees and remaining host/network risks.
+
+Android only. No iOS, complete Docker deployment, remote WebRTC or malicious-APK sandbox. Linux real-device/media and macOS ARM device acceptance remain unverified.

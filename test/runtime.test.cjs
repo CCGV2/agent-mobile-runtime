@@ -136,8 +136,9 @@ test('starts, stops, and destroys private devices without affecting another sess
   await f.runtime.execute(a.id, 'stop');
   assert.equal(f.runtime.state(a.id).state, 'stopped');
   assert.equal(f.runtime.state(b.id).state, 'running');
-  assert.deepEqual(f.backend.launched[0].child.signals, ['SIGTERM']);
-  assert.deepEqual(f.backend.launched[1].child.signals, []);
+  // Concurrent starts can finish their private disk writes in either order.
+  assert.deepEqual(f.backend.launched.find(item => item.device.id === a.id).child.signals, ['SIGTERM']);
+  assert.deepEqual(f.backend.launched.find(item => item.device.id === b.id).child.signals, []);
   await f.runtime.destroySession(a.id);
   assert.equal(f.runtime.authorizeSession(a.id, token), false);
   assert.equal(f.runtime.state(b.id).state, 'running');

@@ -5,6 +5,11 @@ with usable KVM**. The runtime already isolates its Linux Android home and
 gRPC discovery under its own `XDG_RUNTIME_DIR`. The Linux-specific installer
 and host checks are separate from the verified Intel macOS deployment.
 
+For the full clone-to-MCP flow, start with [the Agent quickstart](quickstart.md).
+`node scripts/setup.cjs --help` selects the installation route. On Linux x86_64
+it uses the private installer below; supplying `--sdk /absolute/installed/sdk`
+instead prepares only a new private template/config from an installed SDK.
+
 Linux installation, protocol tests and synthetic media tests must not be
 reported as real Android acceptance. A complete Linux device and audible-media
 acceptance still requires the deployment host's `/dev/kvm`. See

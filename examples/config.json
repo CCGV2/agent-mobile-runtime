@@ -17,7 +17,7 @@
   "mediaMaxDurationSec": 300,
   "mediaMaxBytes": 268435456,
   "templates": {
-    "clean": {
+    "clean35": {
       "avdDir": "/absolute/path/to/clean-template.avd"
     }
   }
