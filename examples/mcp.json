@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "agent-mobile": {
+      "command": "node",
+      "args": ["/absolute/path/to/agent-mobile-runtime/bin/agent-mobile.cjs", "--config", "/absolute/path/to/config.json", "mcp"],
+      "env": {
+        "AGENT_MOBILE_SESSION_FILE": "/absolute/path/from/session-create/credentialFile"
+      }
+    }
+  }
+}

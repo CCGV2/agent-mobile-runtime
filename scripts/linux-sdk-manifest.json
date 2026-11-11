@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "platform": "linux",
+  "architecture": "x64",
+  "commandLineTools": {
+    "version": "22.0",
+    "url": "https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip",
+    "sha256": "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583",
+    "source": "https://developer.android.com/studio"
+  },
+  "scrcpy": {
+    "version": "5.0.1",
+    "url": "https://github.com/Genymobile/scrcpy/releases/download/v5.0.1/scrcpy-linux-x86_64-v5.0.1.tar.gz",
+    "sha256": "9f969d30cc574816077edecda65719c1c70b0aee1df1ba5fa00779ac07b8fd6e",
+    "source": "https://github.com/Genymobile/scrcpy/blob/v5.0.1/doc/linux.md"
+  },
+  "sdkPackages": [
+    "platform-tools",
+    "emulator",
+    "platforms;android-35",
+    "build-tools;35.0.0",
+    "system-images;android-35;default;x86_64"
+  ],
+  "repositories": [
+    "https://dl.google.com/android/repository/repository2-1.xml",
+    "https://dl.google.com/android/repository/sys-img/android/sys-img2-1.xml"
+  ]
+}

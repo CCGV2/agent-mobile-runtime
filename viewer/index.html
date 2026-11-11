@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>虚拟手机 · Agent Mobile Runtime</title>
+  <link rel="stylesheet" href="/viewer.css">
+  <script src="/viewer.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">M</span>
+      <div><p class="eyebrow">AGENT MOBILE RUNTIME</p><h1>虚拟手机</h1></div>
+    </div>
+    <div class="topbar-actions">
+      <span class="connection" id="connection-status"><span class="status-dot" aria-hidden="true"></span><span id="connection-text">正在连接</span></span>
+      <button class="button quiet" id="refresh-button" type="button" hidden>刷新</button>
+      <button class="button quiet" id="logout-button" type="button" hidden>退出</button>
+    </div>
+  </header>
+
+  <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
+
+  <main>
+    <section class="login-card" id="login-panel" aria-labelledby="login-title">
+      <div class="large-mark" aria-hidden="true">↗</div>
+      <p class="eyebrow">本地设备控制台</p>
+      <h2 id="login-title">打开你的虚拟手机</h2>
+      <p id="login-description">正在验证此浏览器的本地访问权限。</p>
+      <div id="login-instructions" hidden>
+        <p>在运行服务的电脑终端执行以下命令。它会打开一次性登录链接，无需复制凭证。</p>
+        <code class="command">node bin/agent-mobile.cjs --config /absolute/config.json open</code>
+        <p class="muted small">将配置路径替换为你实际使用的文件。请在自己的终端执行。</p>
+      </div>
+    </section>
+
+    <div class="workspace" id="workspace" hidden>
+      <aside class="panel devices-panel" aria-labelledby="devices-title">
+        <div class="panel-heading"><h2 id="devices-title">我的设备</h2><span class="count" id="device-count">0</span></div>
+        <p class="muted small">每台虚拟手机拥有独立的应用与数据。</p>
+        <div class="device-list" id="device-list" aria-label="选择虚拟手机"></div>
+        <div class="device-list-empty" id="device-list-empty"><span aria-hidden="true">＋</span><p>还没有虚拟手机</p></div>
+        <form class="create-form" id="create-form">
+          <label for="template-select">从干净模板创建</label>
+          <select id="template-select" name="template" required><option value="">正在读取模板…</option></select>
+          <button class="button primary full-width" id="create-button" type="submit" disabled>创建虚拟手机</button>
+          <p class="muted small" id="template-hint">创建后可以启动设备并查看画面。</p>
+        </form>
+      </aside>
+
+      <section class="panel screen-panel" aria-labelledby="screen-title">
+        <div class="screen-heading">
+          <div><h2 id="screen-title">设备画面</h2><p class="muted small" id="screen-subtitle">选择或创建一台虚拟手机</p></div>
+          <span class="badge" id="device-state" hidden></span>
+        </div>
+        <div class="device-toolbar" id="device-toolbar" hidden>
+          <div class="button-group"><button class="button" id="start-button" type="button">启动</button><button class="button" id="stop-button" type="button">停止</button></div>
+          <div class="button-group"><button class="button accent" id="takeover-button" type="button">接管设备</button><button class="button danger-quiet" id="destroy-button" type="button">销毁</button></div>
+        </div>
+        <div class="live-toolbar" id="live-toolbar" hidden>
+          <div class="button-group">
+            <button class="button" id="live-start-button" type="button" disabled>实时预览</button>
+            <button class="button" id="live-stop-button" type="button" hidden>关闭实时预览</button>
+            <button class="button" id="live-audio-button" type="button" hidden disabled>打开声音</button>
+          </div>
+          <p class="muted small" id="live-status">未配置实时通道，当前使用截图预览。</p>
+        </div>
+        <div class="screen-stage" id="screen-stage">
+          <div class="screen-empty" id="screen-empty">
+            <div class="phone-outline" aria-hidden="true"><span></span></div>
+            <h3 id="empty-title">一台专门为任务准备的手机</h3>
+            <p id="empty-description">创建独立的 Android 虚拟设备，在这里查看 Agent 的操作。</p>
+          </div>
+          <div class="phone-frame" id="phone-frame" hidden>
+            <img id="screen-image" alt="所选虚拟手机的当前屏幕" draggable="false">
+            <video id="live-video" autoplay muted playsinline aria-label="所选虚拟手机的本机实时画面" hidden></video>
+          </div>
+        </div>
+        <div class="screen-footer">
+          <p class="muted small" id="preview-status">截图预览 · 每 2 秒刷新</p>
+          <div class="navigation" aria-label="Android 导航">
+            <button class="button nav-button" id="back-button" type="button" aria-label="返回" title="返回" disabled>←</button>
+            <button class="button nav-button" id="home-button" type="button" aria-label="主屏幕" title="主屏幕" disabled>○</button>
+            <button class="button nav-button" id="enter-button" type="button" aria-label="回车" title="回车" disabled>↵</button>
+          </div>
+        </div>
+        <p class="control-hint small" id="control-hint">接管后可点击画面；Agent 会暂停观察和操作。</p>
+      </section>
+
+      <aside class="panel recordings-panel" aria-labelledby="recordings-title">
+        <div class="panel-heading"><h2 id="recordings-title">录制</h2><span class="record-icon" aria-hidden="true"></span></div>
+        <p class="muted small">保存画面和 App 的内部声音，完成后下载或试听。</p>
+        <form class="record-form" id="record-form">
+          <label for="record-kind">录制内容</label>
+          <select id="record-kind" name="kind"><option value="screen">画面 + 内部声音</option><option value="audio">仅内部声音</option></select>
+          <label for="record-duration">时长（秒）</label>
+          <input id="record-duration" name="duration" type="number" min="1" max="300" value="30" required>
+          <button class="button full-width" id="record-button" type="submit" disabled>开始录制</button>
+        </form>
+        <div class="recording-divider"></div>
+        <div class="recording-list" id="recording-list"></div>
+        <div class="recordings-empty" id="recordings-empty"><p>还没有录制内容</p><p class="muted small">启动设备后即可录制。</p></div>
+        <p class="recording-footnote muted small">实时预览仅支持本机连接，默认静音。录制与实时预览分别控制；点击仍使用设备截图确认。</p>
+      </aside>
+    </div>
+  </main>
+  <footer class="page-footer"><span>只连接本服务创建的 Android 虚拟设备</span><span>LOCAL RUNTIME · v0.1</span></footer>
+</body>
+</html>

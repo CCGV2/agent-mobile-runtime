@@ -1,0 +1,6 @@
+# Media-only WebRTC peer. Pinned together from published PyPI releases.
+aiortc==1.16.0
+aioice==0.13.0
+grpcio==1.85.1
+grpcio-tools==1.85.1
+protobuf==7.36.2

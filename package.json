@@ -1,0 +1,22 @@
+{
+  "name": "agent-mobile-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Session-owned Android emulators with MCP control and bounded audio/video recording",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CCGV2/agent-mobile-runtime.git"
+  },
+  "type": "commonjs",
+  "engines": { "node": ">=22" },
+  "bin": { "agent-mobile": "bin/agent-mobile.cjs" },
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "doctor": "node bin/agent-mobile.cjs doctor",
+    "start": "node bin/agent-mobile.cjs serve",
+    "test:emulator": "node --test test/emulator.integration.cjs",
+    "test:webrtc": "node --test test/webrtc-browser.integration.cjs",
+    "test:webrtc:emulator": "node --test test/webrtc-emulator.integration.cjs"
+  }
+}

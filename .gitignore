@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+.runtime/
+coverage/
+config.local.json
+test/fixtures/build/
+**/__pycache__/
+*.pyc

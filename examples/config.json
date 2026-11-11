@@ -1,0 +1,24 @@
+{
+  "dataDir": "/absolute/path/to/private/mobile-data",
+  "sdkRoot": "/absolute/path/to/Android/sdk",
+  "adbPath": "/absolute/path/to/Android/sdk/platform-tools/adb",
+  "emulatorPath": "/absolute/path/to/Android/sdk/emulator/emulator",
+  "scrcpyPath": "scrcpy",
+  "ffprobePath": "ffprobe",
+  "controlPort": 7341,
+  "adbServerPort": 5038,
+  "maxDevices": 2,
+  "headless": true,
+  "webrtc": {
+    "enabled": false,
+    "pythonPath": null,
+    "protoDir": null
+  },
+  "mediaMaxDurationSec": 300,
+  "mediaMaxBytes": 268435456,
+  "templates": {
+    "clean": {
+      "avdDir": "/absolute/path/to/clean-template.avd"
+    }
+  }
+}
