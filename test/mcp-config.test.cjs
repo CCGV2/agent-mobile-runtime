@@ -9,6 +9,8 @@ const {spawn, execFile} = require('node:child_process');
 const {promisify} = require('node:util');
 const {createMCPConfig} = require('../src/mcp-config.cjs');
 const {loadConfig} = require('../src/config.cjs');
+const {createMCPBroker} = require('../src/mcp-broker.cjs');
+const {createHash} = require('node:crypto');
 const execute = promisify(execFile);
 const SESSION = 'm-11111111-1111-4111-8111-111111111111';
 const TOKEN = 'd'.repeat(64);
@@ -17,7 +19,7 @@ async function fixture(t) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'mobile mcp config ')));
   t.after(() => fs.rm(root, {recursive: true, force: true}));
   const configFile = path.join(root, 'runtime config.json');
-  await fs.writeFile(configFile, JSON.stringify({dataDir: path.join(root, 'private data'), sdkRoot: path.join(root, 'sdk')}), {mode: 0o600});
+  await fs.writeFile(configFile, JSON.stringify({dataDir: path.join(root, 'private data'), sdkRoot: path.join(root, 'sdk'), templates: {clean35: {avdDir: path.join(root, 'template.avd')}}}), {mode: 0o600});
   const config = await loadConfig(configFile);
   const credentialFile = path.join(config.dataDir, 'secrets', 'sessions', `${SESSION}.json`);
   await fs.mkdir(path.dirname(credentialFile), {recursive: true, mode: 0o700});
@@ -36,6 +38,18 @@ test('generated MCP config has absolute executable/file paths, keeps spaced path
   assert.equal(entry.env.AGENT_MOBILE_SESSION_FILE, f.credentialFile);
   assert.equal(JSON.stringify(fragment).includes(TOKEN), false);
   await assert.rejects(fs.stat(path.join(f.config.dataDir, 'secrets', 'admin-token')), {code: 'ENOENT'});
+});
+
+test('keyed MCP config needs no session credential and never invents a globally shared key', async t => {
+  const f = await fixture(t);
+  await fs.unlink(f.credentialFile);
+  const fragment = await createMCPConfig({...f, sessionId: undefined});
+  assert.deepEqual(fragment.mcpServers['agent-mobile'].env, {AGENT_MOBILE_TEMPLATE: 'clean35'});
+  assert.equal(JSON.stringify(fragment).includes(TOKEN), false);
+  const multi = {...f.config, templates: {...f.config.templates, other: {avdDir: path.join(f.root, 'other.avd')}}};
+  await assert.rejects(createMCPConfig({...f, config: multi, sessionId: undefined}), /--template/);
+  assert.equal((await createMCPConfig({...f, config: multi, sessionId: undefined, template: 'other'})).mcpServers['agent-mobile'].env.AGENT_MOBILE_TEMPLATE, 'other');
+  await assert.rejects(createMCPConfig({...f, sessionId: undefined, template: 'missing'}), /--template/);
 });
 
 test('MCP config refuses malformed IDs, absent, readable, linked, or mismatched credentials without exposing their contents', async t => {
@@ -59,6 +73,14 @@ test('MCP config refuses malformed IDs, absent, readable, linked, or mismatched 
 
 test('CLI-generated fragment starts a real STDIO MCP with a minimal GUI-style PATH', async t => {
   const f = await fixture(t);
+  const session = {id: SESSION, tokenHash: createHash('sha256').update(TOKEN).digest('hex')};
+  const runtime = {config: f.config, sessions: new Map([[SESSION, session]]),
+    authorizeSession: (id, token) => id === SESSION && token === TOKEN,
+    state: id => ({id, state: 'stopped'}), listManagedSessions: () => [],
+  };
+  const broker = createMCPBroker({runtime});
+  await broker.listen();
+  t.after(() => broker.close());
   const cli = path.resolve(__dirname, '..', 'bin', 'agent-mobile.cjs');
   const printed = await execute(process.execPath, [cli, '--config', f.configFile, 'mcp-config', SESSION]);
   assert.equal(printed.stdout.includes(TOKEN), false);

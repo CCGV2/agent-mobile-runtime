@@ -55,6 +55,16 @@ also started a real STDIO process, initialized and listed tools with a minimal
 GUI-style PATH, without embedding a token. The complete Node suite passed
 191 tests, including the new setup and credential/config checks.
 
+Keyed MCP routing was verified separately on 2026-11-11. The Node suite passed
+219 tests without skips. Real private Unix sockets and service/MCP CLI processes
+checked distinct-key allocation, same-key reconnect, cross-mode duplicate
+fencing, idle expiry, pending-request retirement, failed-cleanup fencing,
+credential revocation (including queued and attachment races), private socket
+permissions and stale-socket recovery. The CLI check allocated stopped test
+AVDs using disposable fixtures; it did not launch Android. These results do
+not establish real multi-emulator hardware capacity or change the Linux/ARM
+device-acceptance boundary. See [session semantics](sessions.md).
+
 Linux setup and compatibility verification are recorded separately in
 [linux.md](linux.md). Linux SDK preparation, Node/Python tests and synthetic
 Chromium media have been exercised in an isolated Linux container. That

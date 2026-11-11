@@ -19,6 +19,15 @@ phone data. It is not a malware analysis sandbox or proof of hypervisor security
   removes the login fragment before exchanging it. Service restart revokes web
   sessions. The viewer is an operator surface, not an Agent tool.
 - Device input is serialized. No automatic retries of uncertain side effects.
+- MCP attaches through an owner-only Unix socket in a private same-account
+  directory. Session keys route trusted local launchers; they are not passwords
+  or multi-user identity. Fixed-session credentials remain authenticated, and
+  generated client entries contain no administrator token.
+- Only one MCP connection can own a phone at a time, across keyed and fixed
+  launch modes. Idle auto-owned phones are reclaimed after a bounded grace
+  period. A disconnect during dispatched work retires the auto-owned phone;
+  cleanup must confirm termination before deletion or replacement. Operator-
+  created phones remain persistent. See [session semantics](docs/sessions.md).
 - Operator takeover blocks subsequent agent observations and input and stops
   recording. In-flight transfers/previously returned data cannot be retracted.
 - Destruction revokes the session credential and deletes its private device tree.
@@ -51,7 +60,8 @@ sockets still exist and depend on DTLS/SRTP and the pinned media stack; these
 checks are not an OS network firewall or protection from same-user shell access.
 
 Do not publish the control port, emulator console, ADB port, data directory or
-credential files. A future Pax bridge must enforce node ownership and a fixed
+credential files, or forward the private MCP socket to untrusted users. A Pax
+bridge must enforce node ownership and a fixed
 operation allowlist; it must not be an arbitrary local network proxy. The API
 alone is not a multi-user identity service.
 

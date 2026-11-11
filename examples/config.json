@@ -8,6 +8,7 @@
   "controlPort": 7341,
   "adbServerPort": 5038,
   "maxDevices": 2,
+  "mcpGraceMs": 300000,
   "headless": true,
   "webrtc": {
     "enabled": false,

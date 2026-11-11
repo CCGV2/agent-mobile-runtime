@@ -9,7 +9,7 @@ const SESSION = 'm-11111111-1111-4111-8111-111111111111';
 const RECORDING = '22222222-2222-4222-8222-222222222222';
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
-function harness(t, implementation = {}) {
+function harness(t, implementation = {}, lifecycle = {}) {
   const input = new PassThrough();
   const output = new PassThrough();
   const lines = [], responses = [], waiters = [], actionCalls = [], requests = [];
@@ -43,7 +43,7 @@ function harness(t, implementation = {}) {
       return implementation.request ? implementation.request(route, options) : {buffer: Buffer.from('recording'), mime: 'audio/ogg'};
     },
   };
-  const server = serveMCP({client, input, output});
+  const server = serveMCP({client, input, output, ...lifecycle});
   t.after(() => {
     server.close(); input.destroy(); output.destroy();
     for (const waiter of waiters) clearTimeout(waiter.timer);
@@ -238,4 +238,33 @@ test('closing the MCP connection aborts inflight work without replying or replay
   assert.equal(h.actionCalls.length, 1);
   assert.equal(h.actionCalls[0].options.signal.aborted, true);
   assert.equal(h.responses.length, 1);
+});
+
+test('disconnect reports pending work and keeps its claim until the actual dispatched operation settles', async t => {
+  let finish, entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const closed = [], idle = [];
+  const h = harness(t, {action: () => new Promise(resolve => { finish = resolve; entered(); })}, {
+    onClose: value => closed.push(value), onIdle: () => idle.push(true),
+  });
+  await h.initialize();
+  h.raw(JSON.stringify({jsonrpc: '2.0', id: 55, method: 'tools/call', params: {name: 'mobile_tap', arguments: {x: 1, y: 2}}})+'\n');
+  await started;
+  h.server.close(); h.server.close();
+  assert.deepEqual(closed, [{pending: 1}]);
+  assert.equal(h.actionCalls[0].options.signal.aborted, true);
+  assert.deepEqual(idle, []);
+  finish({ok: true}); await turn();
+  assert.deepEqual(idle, [true]);
+  assert.equal(h.responses.length, 1);
+  assert.equal(h.actionCalls.length, 1);
+});
+
+test('an idle transport reports one clean close without waiting for nonexistent operations', async t => {
+  const closed = [], idle = [];
+  const h = harness(t, {}, {onClose: value => closed.push(value), onIdle: () => idle.push(true)});
+  await h.initialize();
+  h.server.close(); h.input.destroy(); await turn();
+  assert.deepEqual(closed, [{pending: 0}]);
+  assert.deepEqual(idle, [true]);
 });

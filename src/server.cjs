@@ -30,8 +30,8 @@ function pngResult(buffer) {
   return {mime: 'image/png', data: buffer.toString('base64'), width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20)};
 }
 
-async function sendArtifact(req, res, runtime, sessionId, recordingId, operator) {
-  const info = await runtime.artifact(sessionId, recordingId, {operator});
+async function sendArtifact(req, res, runtime, sessionId, recordingId, operator, expectedTokenHash) {
+  const info = await runtime.artifact(sessionId, recordingId, {operator, expectedTokenHash});
   const handle = await fs.open(info.path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = await handle.stat();
@@ -127,13 +127,15 @@ function createServer({runtime, provisioner}) {
         validate({type: 'object', properties: {action: {type: 'string', minLength: 1, maxLength: 40}, args: {}}, required: ['action']}, value);
         validateAction(value.action, value.args || {});
         if (admin && value.action === 'takeover') for (const response of streams.get(sessionId) || []) response.destroy();
-        const result = await runtime.execute(sessionId, value.action, value.args, {operator: admin});
+        const result = await runtime.execute(sessionId, value.action, value.args, {operator: admin,
+          ...(!admin ? {expectedTokenHash: createHash('sha256').update(bearer).digest('hex')} : {})});
         return json(res, 200, Buffer.isBuffer(result) ? pngResult(result) : result);
       }
       if (endpoint === 'artifacts' && /^[a-f0-9-]{36}$/.test(recordingId || '') && ['GET', 'HEAD'].includes(req.method)) {
         let set = streams.get(sessionId); if (!set) streams.set(sessionId, set = new Set());
         set.add(res);
-        try { await sendArtifact(req, res, runtime, sessionId, recordingId, admin); }
+        try { await sendArtifact(req, res, runtime, sessionId, recordingId, admin,
+          admin ? undefined : createHash('sha256').update(bearer).digest('hex')); }
         finally { set.delete(res); if (!set.size) streams.delete(sessionId); }
         return;
       }

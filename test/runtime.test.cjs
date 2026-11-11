@@ -6,6 +6,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const {EventEmitter} = require('node:events');
+const {createHash} = require('node:crypto');
 const {MobileRuntime} = require('../src/runtime.cjs');
 const {Provisioner} = require('../src/provision.cjs');
 
@@ -117,6 +118,242 @@ test('credentials are scoped to one session and separate from the operator crede
   assert.equal(f.runtime.state(first.id).capabilities.realtimeMedia, false);
   if (process.platform !== 'win32') assert.equal((await fs.stat(first.credentialFile)).mode & 0o777, 0o600);
   await assert.rejects(f.runtime.createSession({template: 'clean', key: 'pax-session-a'}), {code: 'session_exists'});
+});
+
+test('concurrent keyed attachment allocates one device and preserves its private credential', async t => {
+  const f = await fixture(t);
+  const results = await Promise.all(Array.from({length: 12}, () => f.runtime.ensureSession({template: 'clean', key: 'task-a'})));
+  assert.equal(new Set(results.map(result => result.id)).size, 1);
+  assert.equal(new Set(results.map(result => result.credentialFile)).size, 1);
+  assert.ok(results.every(result => result.managed === true && result.state === 'stopped'));
+  assert.equal(f.runtime.list().length, 1);
+  assert.equal((await fs.readdir(path.join(f.config.dataDir, 'devices'))).length, 1);
+  const initial = await fs.readFile(results[0].credentialFile, 'utf8');
+  const expectedTokenHash = createHash('sha256').update(JSON.parse(initial).token).digest('hex');
+  assert.ok(results.every(result => result.expectedTokenHash === expectedTokenHash));
+  const again = await f.runtime.ensureSession({template: 'clean', key: 'task-a'});
+  assert.equal(again.id, results[0].id);
+  assert.equal(await fs.readFile(again.credentialFile, 'utf8'), initial);
+  assert.equal(again.expectedTokenHash, expectedTokenHash);
+  assert.equal(JSON.stringify(results).includes(JSON.parse(initial).token), false);
+  assert.deepEqual(f.runtime.listManagedSessions(), [{id: again.id, key: 'task-a', template: 'clean', state: 'stopped'}]);
+  const publicState = JSON.stringify(f.runtime.list());
+  assert.ok(!publicState.includes('task-a'));
+  assert.ok(!publicState.includes('mcpManaged'));
+});
+
+test('different logical keys isolate devices and stopped managed sessions still consume capacity', async t => {
+  const f = await fixture(t);
+  f.config.maxDevices = 2;
+  const [a, b] = await Promise.all(['task-a', 'task-b'].map(key => f.runtime.ensureSession({template: 'clean', key})));
+  assert.notEqual(a.id, b.id);
+  const first = f.runtime.sessions.get(a.id), second = f.runtime.sessions.get(b.id);
+  assert.notEqual(first.device.port, second.device.port);
+  assert.notEqual(first.device.avdDir, second.device.avdDir);
+  const credentialA = await credentials(a), credentialB = await credentials(b);
+  assert.equal(f.runtime.authorizeSession(b.id, credentialA.token), false);
+  assert.equal(f.runtime.authorizeSession(a.id, credentialB.token), false);
+  await assert.rejects(f.runtime.ensureSession({template: 'clean', key: 'task-c'}), {code: 'capacity', status: 409});
+  assert.equal((await f.runtime.ensureSession({template: 'clean', key: 'task-a'})).id, a.id);
+  await f.runtime.destroySession(a.id);
+  const c = await f.runtime.ensureSession({template: 'clean', key: 'task-c'});
+  assert.notEqual(c.id, a.id);
+  assert.equal(f.runtime.state(b.id).state, 'stopped');
+  assert.equal(f.runtime.authorizeSession(b.id, credentialB.token), true);
+});
+
+test('keyed attachment rejects invalid keys and template changes without allocating or replacing devices', async t => {
+  const f = await fixture(t);
+  for (const key of [undefined, '', null, {}, 'a'.repeat(201)]) await assert.rejects(f.runtime.ensureSession({template: 'clean', key}), {code: 'invalid_key'});
+  assert.equal(f.runtime.list().length, 0);
+  const first = await f.runtime.ensureSession({template: 'clean', key: 'task-a'});
+  f.config.templates.other = f.config.templates.clean;
+  await assert.rejects(f.runtime.ensureSession({template: 'other', key: 'task-a'}), {code: 'session_template_mismatch', status: 409});
+  assert.equal((await f.runtime.ensureSession({template: 'clean', key: 'task-a'})).id, first.id);
+  assert.equal(f.runtime.list().length, 1);
+});
+
+test('attaching an operator-created key does not turn its persistent device into an automatically managed one', async t => {
+  const f = await fixture(t);
+  const manual = await f.runtime.createSession({template: 'clean', key: 'task-a'});
+  const original = await fs.readFile(manual.credentialFile, 'utf8');
+  const resumed = await f.runtime.ensureSession({template: 'clean', key: 'task-a'});
+  assert.equal(resumed.id, manual.id);
+  assert.equal(resumed.managed, false);
+  assert.equal(resumed.expectedTokenHash, createHash('sha256').update(JSON.parse(original).token).digest('hex'));
+  assert.equal(Object.hasOwn(manual, 'expectedTokenHash'), false);
+  assert.equal(await fs.readFile(resumed.credentialFile, 'utf8'), original);
+  assert.deepEqual(f.runtime.listManagedSessions(), []);
+  await assert.rejects(f.runtime.createSession({template: 'clean', key: 'task-a'}), {code: 'session_exists'});
+});
+
+test('keyed reconnect never repairs missing, linked, public, invalid, or revoked credential files', async t => {
+  const f = await fixture(t);
+  const session = await f.runtime.ensureSession({template: 'clean', key: 'task-a'});
+  const original = await fs.readFile(session.credentialFile, 'utf8');
+  const value = JSON.parse(original);
+  const target = path.join(f.root, 'credential-target.json');
+  await fs.writeFile(target, original, {mode: 0o600});
+  const mutations = [
+    async () => {},
+    async () => fs.symlink(target, session.credentialFile),
+    async () => fs.writeFile(session.credentialFile, original, {mode: 0o644}),
+    async () => fs.writeFile(session.credentialFile, value.token + ' is malformed JSON', {mode: 0o600}),
+    async () => fs.writeFile(session.credentialFile, JSON.stringify({...value, sessionId: 'm-00000000-0000-4000-8000-000000000000'}), {mode: 0o600}),
+    async () => fs.writeFile(session.credentialFile, JSON.stringify({...value, token: value.token === 'a'.repeat(64) ? 'b'.repeat(64) : 'a'.repeat(64)}), {mode: 0o600}),
+  ];
+  for (const mutate of mutations) {
+    await fs.rm(session.credentialFile, {force: true});
+    await mutate();
+    const before = await fs.lstat(session.credentialFile).catch(() => undefined);
+    await assert.rejects(f.runtime.ensureSession({template: 'clean', key: 'task-a'}), error => error.code === 'session_credentials_unavailable' && error.status === 409 && !error.message.includes(value.token));
+    if (!before) await assert.rejects(fs.lstat(session.credentialFile), {code: 'ENOENT'});
+    assert.equal(f.runtime.list().length, 1);
+    assert.equal(f.runtime.state(session.id).state, 'stopped');
+  }
+  await fs.rm(session.credentialFile, {force: true});
+  await fs.writeFile(session.credentialFile, original, {mode: 0o600});
+  assert.equal((await f.runtime.ensureSession({template: 'clean', key: 'task-a'})).id, session.id);
+});
+
+test('managed ownership survives reload while older operator-created sessions stay persistent', async t => {
+  const f = await fixture(t);
+  const managed = await f.runtime.ensureSession({template: 'clean', key: 'auto'});
+  const manual = await f.runtime.createSession({template: 'clean', key: 'manual'});
+  const original = await fs.readFile(managed.credentialFile, 'utf8');
+  await f.runtime.close();
+  f.runtime = await new MobileRuntime({config: f.config, backend: f.backend, media: f.media, provisioner: f.provisioner}).init();
+  assert.deepEqual(f.runtime.listManagedSessions(), [{id: managed.id, key: 'auto', template: 'clean', state: 'stopped'}]);
+  assert.equal((await f.runtime.ensureSession({template: 'clean', key: 'auto'})).managed, true);
+  assert.equal((await f.runtime.ensureSession({template: 'clean', key: 'manual'})).managed, false);
+  assert.equal(await fs.readFile(managed.credentialFile, 'utf8'), original);
+  assert.equal(f.runtime.state(manual.id).state, 'stopped');
+});
+
+test('saved routing identities and managed ownership are validated before restoring sessions', async t => {
+  const f = await fixture(t);
+  await f.runtime.ensureSession({template: 'clean', key: 'auto'});
+  await f.runtime.close();
+  const file = path.join(f.config.dataDir, 'runtime.json');
+  const original = JSON.parse(await fs.readFile(file, 'utf8'));
+  for (const edit of [
+    value => { value.sessions[0].mcpManaged = 'yes'; },
+    value => { delete value.sessions[0].key; },
+    value => { value.sessions.push({...value.sessions[0]}); },
+  ]) {
+    const changed = structuredClone(original); edit(changed);
+    await fs.writeFile(file, JSON.stringify(changed));
+    await assert.rejects(new MobileRuntime({config: f.config, backend: f.backend, media: f.media, provisioner: f.provisioner}).init(), /runtime session|managed MCP|Duplicate runtime/);
+  }
+  await fs.writeFile(file, JSON.stringify(original));
+});
+
+test('shutdown drains and rolls back an allocation that is still provisioning before unlocking', async t => {
+  const f = await fixture(t);
+  const originalCreate = f.provisioner.create.bind(f.provisioner);
+  let entered, release;
+  const enteredPromise = new Promise(resolve => { entered = resolve; });
+  const released = new Promise(resolve => { release = resolve; });
+  f.provisioner.create = async options => {
+    const device = await originalCreate(options);
+    entered();
+    await released;
+    return device;
+  };
+  const allocation = f.runtime.ensureSession({template: 'clean', key: 'auto'});
+  const rejected = assert.rejects(allocation, {code: 'closing', status: 503});
+  await enteredPromise;
+  const closed = f.runtime.close();
+  assert.equal(f.runtime.closing, true);
+  assert.ok((await fs.stat(f.runtime.lockFile)).isFile());
+  release();
+  await Promise.all([closed, rejected]);
+  assert.deepEqual(f.runtime.list(), []);
+  assert.deepEqual(await fs.readdir(path.join(f.config.dataDir, 'devices')), []);
+  assert.deepEqual(await fs.readdir(path.join(f.config.dataDir, 'secrets', 'sessions')), []);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(f.config.dataDir, 'runtime.json'), 'utf8')).sessions, []);
+  await assert.rejects(fs.stat(f.runtime.lockFile), {code: 'ENOENT'});
+});
+
+test('bound session capabilities are checked inside the lock after failed destruction revokes credentials', async t => {
+  const f = await fixture(t);
+  const session = await f.runtime.ensureSession({template: 'clean', key: 'auto'});
+  const credential = await credentials(session);
+  const expectedTokenHash = createHash('sha256').update(credential.token).digest('hex');
+  let entered, release;
+  const stopping = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  f.media.stopDevice = async () => { entered(); await gate; };
+  let reads = 0;
+  f.media.artifact = async () => { reads++; return {path: '/must-not-read'}; };
+  f.provisioner.destroy = async () => { throw new Error('Test disk deletion failed.'); };
+  const destroyed = assert.rejects(f.runtime.destroySession(session.id), /Test disk deletion failed/);
+  await stopping;
+  assert.equal(f.runtime.authorizeSession(session.id, credential.token), true, 'Credentials were valid before these requests queued.');
+  const denials = [
+    assert.rejects(f.runtime.execute(session.id, 'state', {}, {expectedTokenHash}), {code: 'unauthorized', status: 401}),
+    assert.rejects(f.runtime.execute(session.id, 'start', {}, {expectedTokenHash}), {code: 'unauthorized', status: 401}),
+    assert.rejects(f.runtime.artifact(session.id, '00000000-0000-4000-8000-000000000000', {expectedTokenHash}), {code: 'unauthorized', status: 401}),
+  ];
+  release();
+  await Promise.all([destroyed, ...denials]);
+  assert.equal(f.runtime.authorizeSession(session.id, credential.token), false);
+  assert.equal(f.runtime.state(session.id).state, 'stopped');
+  assert.equal((await f.runtime.execute(session.id, 'state')).id, session.id, 'Trusted operator calls without a captured capability stay compatible.');
+  assert.equal(f.backend.launched.length, 0);
+  assert.equal(reads, 0);
+});
+
+test('keyed attachment captures the validated credential hash even if revocation immediately follows validation', async t => {
+  const f = await fixture(t);
+  const session = await f.runtime.ensureSession({template: 'clean', key: 'auto'});
+  const original = f.runtime.authorizeSession.bind(f.runtime);
+  f.runtime.authorizeSession = (id, token) => {
+    const authorized = original(id, token);
+    if (authorized) f.runtime.sessions.get(id).tokenHash = 'f'.repeat(64);
+    return authorized;
+  };
+  const attached = await f.runtime.ensureSession({template: 'clean', key: 'auto'});
+  assert.equal(attached.expectedTokenHash, session.expectedTokenHash);
+  assert.notEqual(attached.expectedTokenHash, f.runtime.sessions.get(session.id).tokenHash);
+  await assert.rejects(f.runtime.execute(session.id, 'state', {}, {expectedTokenHash: attached.expectedTokenHash}), {code: 'unauthorized', status: 401});
+});
+
+test('invalid expected session capabilities are rejected even for state and artifact reads', async t => {
+  const f = await fixture(t);
+  const session = await f.runtime.createSession({template: 'clean'});
+  const credential = await credentials(session);
+  const correct = createHash('sha256').update(credential.token).digest('hex');
+  assert.equal((await f.runtime.execute(session.id, 'state', {}, {expectedTokenHash: correct})).id, session.id);
+  for (const expectedTokenHash of [null, {}, Buffer.alloc(32), 'invalid', '0'.repeat(64)]) {
+    await assert.rejects(f.runtime.execute(session.id, 'state', {}, {expectedTokenHash, operator: true}), {code: 'unauthorized', status: 401});
+    await assert.rejects(f.runtime.artifact(session.id, '00000000-0000-4000-8000-000000000000', {expectedTokenHash}), {code: 'unauthorized', status: 401});
+  }
+});
+
+test('an invalid bound capability cannot abort a boot before locked authentication', async t => {
+  const f = await fixture(t);
+  const session = await f.runtime.createSession({template: 'clean'});
+  const credential = await credentials(session);
+  const expectedTokenHash = createHash('sha256').update(credential.token).digest('hex');
+  let entered, finishBoot, signal;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  f.backend.onWaitReady = (_device, options) => new Promise((resolve, reject) => {
+    signal = options.signal; finishBoot = resolve;
+    signal.addEventListener('abort', () => {
+      const error = new Error('Fake boot aborted'); error.name = 'AbortError'; reject(error);
+    }, {once: true});
+    entered();
+  });
+  const started = f.runtime.execute(session.id, 'start', {}, {expectedTokenHash}).then(value => ({value}), error => ({error}));
+  await waiting;
+  const stopped = f.runtime.execute(session.id, 'stop', {}, {expectedTokenHash: '0'.repeat(64)}).then(value => ({value}), error => ({error}));
+  const wasAborted = signal.aborted;
+  finishBoot();
+  const [start, stop] = await Promise.all([started, stopped]);
+  assert.equal(wasAborted, false);
+  assert.equal(start.value?.state, 'running');
+  assert.equal(stop.error?.code, 'unauthorized');
 });
 
 test('starts, stops, and destroys private devices without affecting another session', async t => {

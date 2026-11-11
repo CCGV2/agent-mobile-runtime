@@ -374,7 +374,7 @@ async function main(argv = process.argv.slice(2), hooks = {}) {
     }
     const config = {dataDir: path.join(root, 'data'), sdkRoot: path.join(root, 'sdk'), scrcpyPath: scrcpy,
       ffmpegPath: dependencies.ffmpeg || 'ffmpeg', ffprobePath: dependencies.ffprobe || 'ffprobe', headless: true,
-      maxDevices: 1, controlPort: 7341, adbServerPort: 5038, emulatorPortStart: 5554,
+      maxDevices: 2, controlPort: 7341, adbServerPort: 5038, emulatorPortStart: 5554,
       bootTimeoutMs: 600000, stopTimeoutMs: 60000, templates: {clean35: {avdDir: avd}}, webrtc: {enabled: false}};
     step = 'validate-template';
     await new Provisioner({config}).validateTemplate('clean35');

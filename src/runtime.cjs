@@ -55,6 +55,7 @@ class MobileRuntime {
         if (saved.schema !== 1 || !Array.isArray(saved.sessions)) throw new Error('Invalid runtime state.');
         for (const session of saved.sessions) {
           this._validateSaved(session);
+          if (this.sessions.has(session.id) || session.key && [...this.sessions.values()].some(existing => existing.key === session.key)) throw new Error('Duplicate runtime session identity.');
           if (['booting', 'running', 'stopping'].includes(session.state)) {
             session.state = 'interrupted';
             session.recoveryRequired = true;
@@ -69,6 +70,8 @@ class MobileRuntime {
 
   _validateSaved(s) {
     if (!s || !identifier(s.id) || !identifier(s.device?.id) || s.id !== s.device.id || !/^[a-f0-9]{64}$/.test(s.tokenHash || '')) throw new Error('Invalid runtime session.');
+    if (s.key !== undefined && (typeof s.key !== 'string' || !s.key.length || s.key.length > 200)) throw new Error('Invalid runtime session key.');
+    if ((s.mcpManaged !== undefined && typeof s.mcpManaged !== 'boolean') || (s.mcpManaged === true && !s.key)) throw new Error('Invalid managed MCP session.');
     const base = path.join(this.config.dataDir, 'devices', s.id);
     if (s.device.deviceDir !== base || s.device.avdHome !== path.join(base, 'avd') || s.device.avdDir !== path.join(base, 'avd', `${s.id}.avd`) || s.device.avdName !== s.id) throw new Error('Invalid managed device paths.');
     const port = s.device.port;
@@ -106,35 +109,79 @@ class MobileRuntime {
     const left = Buffer.from(a || ''); const right = Buffer.from(b || '');
     return left.length === right.length && timingSafeEqual(left, right);
   }
+  _matchesSessionCapability(session, expectedTokenHash) {
+    return expectedTokenHash === undefined || !!session && typeof expectedTokenHash === 'string' && /^[a-f0-9]{64}$/.test(expectedTokenHash) && this._equal(session.tokenHash, expectedTokenHash);
+  }
 
   async createSession({template, key} = {}) {
+    return this._with('create', () => this._createSession({template, key}));
+  }
+
+  // Trusted local broker entry point. A logical key routes a connection; the
+  // private credential remains a separate capability and is never regenerated
+  // merely because a reconnect cannot read the existing one. expectedTokenHash
+  // is a broker-only snapshot of that credential, never public/model output.
+  async ensureSession({template, key} = {}) {
     return this._with('create', async () => {
       if (this.closing) fail('closing', 'Runtime is stopping.', 503);
-      if (key !== undefined && (typeof key !== 'string' || !key.length || key.length > 200)) fail('invalid_key', 'Invalid session key.');
-      if (key && [...this.sessions.values()].some(s => s.key === key)) fail('session_exists', 'That logical session already exists.', 409);
-      if (this.sessions.size >= this.config.maxDevices) fail('capacity', 'Device capacity reached; destroy an unused session.', 409);
-      const id = `m-${randomUUID()}`;
-      const used = new Set([...this.sessions.values()].map(s => s.device.port));
-      let port = this.config.emulatorPortStart;
-      while (used.has(port)) port += 2;
-      await this._audit(id, 'create', 'started');
-      const device = {...await this.provisioner.create({id, template}), port, serial: `emulator-${port}`};
-      const token = randomBytes(32).toString('hex');
-      const credentialFile = path.join(this.config.dataDir, 'secrets', 'sessions', `${id}.json`);
-      const session = {id, key, device, template, tokenHash: hash(token), state: 'stopped', takeover: false, recoveryRequired: false, createdAt: new Date().toISOString()};
+      if (typeof key !== 'string' || !key.length || key.length > 200) fail('invalid_key', 'Invalid session key.');
+      const session = [...this.sessions.values()].find(s => s.key === key);
+      if (!session) return {...await this._createSession({template, key}, true), managed: true};
+      if (session.template !== template) fail('session_template_mismatch', 'That session key belongs to a different template.', 409);
+      const credentialFile = path.join(this.config.dataDir, 'secrets', 'sessions', `${session.id}.json`);
+      let expectedTokenHash;
       try {
-        await writePrivate(credentialFile, JSON.stringify({schema: 1, sessionId: id, token}) + '\n');
-        this.sessions.set(id, session);
-        await this._save();
-      } catch (error) {
-        this.sessions.delete(id);
-        await fs.rm(credentialFile, {force: true});
-        await this.provisioner.destroy(device);
-        throw error;
+        const credential = JSON.parse(await readPrivate(credentialFile));
+        if (credential.schema !== 1 || credential.sessionId !== session.id || !/^[a-f0-9]{64}$/.test(credential.token || '') || !this.authorizeSession(session.id, credential.token)) throw new Error('Invalid session credential.');
+        expectedTokenHash = hash(credential.token);
+      } catch {
+        fail('session_credentials_unavailable', 'Existing session credentials are unavailable or invalid; inspect the session before reconnecting.', 409);
       }
-      await this._audit(id, 'create', 'completed');
-      return {...this.state(id), credentialFile};
+      if (this.closing) fail('closing', 'Runtime is stopping.', 503);
+      return {...this.state(session.id), credentialFile, managed: session.mcpManaged === true, expectedTokenHash};
     });
+  }
+
+  // These routing/ownership details stay out of the public state/list API.
+  listManagedSessions() {
+    return [...this.sessions.values()].filter(s => s.mcpManaged === true).map(({id, key, template, state}) => ({id, key, template, state}));
+  }
+
+  async _createSession({template, key}, mcpManaged = false) {
+    if (this.closing) fail('closing', 'Runtime is stopping.', 503);
+    if (key !== undefined && (typeof key !== 'string' || !key.length || key.length > 200)) fail('invalid_key', 'Invalid session key.');
+    if (key && [...this.sessions.values()].some(s => s.key === key)) fail('session_exists', 'That logical session already exists.', 409);
+    if (this.sessions.size >= this.config.maxDevices) fail('capacity', 'Device capacity reached; destroy an unused session.', 409);
+    const id = `m-${randomUUID()}`;
+    const used = new Set([...this.sessions.values()].map(s => s.device.port));
+    let port = this.config.emulatorPortStart;
+    while (used.has(port)) port += 2;
+    await this._audit(id, 'create', 'started');
+    if (this.closing) fail('closing', 'Runtime is stopping.', 503);
+    let device, registered = false, credentialWritten = false;
+    const credentialFile = path.join(this.config.dataDir, 'secrets', 'sessions', `${id}.json`);
+    try {
+      device = {...await this.provisioner.create({id, template}), port, serial: `emulator-${port}`};
+      if (this.closing) fail('closing', 'Runtime is stopping.', 503);
+      const token = randomBytes(32).toString('hex');
+      const session = {id, key, device, template, tokenHash: hash(token), state: 'stopped', takeover: false, recoveryRequired: false, createdAt: new Date().toISOString(), ...(mcpManaged ? {mcpManaged: true} : {})};
+      await writePrivate(credentialFile, JSON.stringify({schema: 1, sessionId: id, token}) + '\n');
+      credentialWritten = true;
+      if (this.closing) fail('closing', 'Runtime is stopping.', 503);
+      this.sessions.set(id, session);
+      registered = true;
+      await this._save();
+      if (this.closing) fail('closing', 'Runtime is stopping.', 503);
+      await this._audit(id, 'create', 'completed');
+      if (this.closing) fail('closing', 'Runtime is stopping.', 503);
+      return {...this.state(id), credentialFile, ...(mcpManaged ? {expectedTokenHash: hash(token)} : {})};
+    } catch (error) {
+      if (registered) this.sessions.delete(id);
+      if (credentialWritten) await fs.rm(credentialFile, {force: true});
+      if (device) await this.provisioner.destroy(device);
+      if (registered) await this._save();
+      throw error;
+    }
   }
 
   _session(id) {
@@ -149,11 +196,13 @@ class MobileRuntime {
   }
   list() { return [...this.sessions.keys()].map(id => this.state(id)); }
 
-  async execute(id, action, args = {}, {operator = false} = {}) {
-    if (action === 'stop' && (operator || !this.sessions.get(id)?.takeover)) this.boots.get(id)?.abort();
+  async execute(id, action, args = {}, {operator = false, expectedTokenHash} = {}) {
+    const current = this.sessions.get(id);
+    if (action === 'stop' && (operator || !current?.takeover) && this._matchesSessionCapability(current, expectedTokenHash)) this.boots.get(id)?.abort();
     return this._with(id, async () => {
       if (this.closing) fail('closing', 'Runtime is stopping.', 503);
       const s = this._session(id);
+      if (!this._matchesSessionCapability(s, expectedTokenHash)) fail('unauthorized', 'Session authentication required.', 401);
       if (!args || Array.isArray(args) || typeof args !== 'object') fail('invalid_arguments', 'Arguments must be an object.');
       if (action === 'state') return this.state(id);
       const agentActions = new Set(['start', 'stop', 'snapshot', 'screenshot', 'tap', 'swipe', 'text', 'key', 'launch_app', 'apps', 'recording_start', 'recording_stop', 'recording_list']);
@@ -318,10 +367,11 @@ class MobileRuntime {
     });
   }
 
-  async artifact(id, recordingId, {operator = false} = {}) {
+  async artifact(id, recordingId, {operator = false, expectedTokenHash} = {}) {
     return this._with(id, async () => {
       if (this.closing) fail('closing', 'Runtime is stopping.', 503);
       const s = this._session(id);
+      if (!this._matchesSessionCapability(s, expectedTokenHash)) fail('unauthorized', 'Session authentication required.', 401);
       if (!operator && s.takeover) fail('human_control', 'Operator has control.', 409);
       return this.media.artifact(id, recordingId);
     });

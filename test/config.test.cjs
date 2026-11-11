@@ -19,10 +19,12 @@ test('configuration isolates service ports and rejects unsafe or ambiguous setti
   assert.equal(config.adbPath, path.join(base.sdkRoot, 'platform-tools/adb'));
   assert.notEqual(config.adbServerPort, 5037);
   assert.equal(config.headless, true);
+  assert.equal(config.mcpGraceMs, 300000);
   for (const invalid of [
     {dataDir: 'relative'}, {controlPort: 5038}, {controlPort: 5555},
     {emulatorPortStart: 5555}, {maxDevices: 100}, {mediaMaxBytes: -1},
     {templates: {bad: {avdDir: 'relative'}}}, {headless: 'yes'},
+    {mcpGraceMs: -1}, {mcpGraceMs: 3600001}, {mcpGraceMs: '300000'},
     {webrtc: {enabled: true}},
     {webrtc: {enabled: false, host: '0.0.0.0'}},
     {webrtc: {enabled: false, iceServers: [{urls: 'stun:example.com'}]}},

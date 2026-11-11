@@ -49,11 +49,13 @@ model prompts, ACP history or audit events.
 | `DELETE /v1/admin/sessions/:id` | Stop, revoke, delete private data; never silently reconnect another device |
 | `GET\|HEAD /v1/admin/sessions/:id/artifacts/:recordingId` | Finalized file, optional single HTTP byte range |
 
-Creation is explicit; it does not start the emulator. The supplied `key` mapping
-is only a logical identifier, not user authentication. Duplicate keys are
-rejected. One runtime session owns exactly one emulator, with a bounded total
-number of devices. paxd must keep an explicit **Pax session → runtime session**
-mapping; never follow whichever device was recently active.
+HTTP creation is explicit; it does not start the emulator. The supplied `key`
+mapping is only a logical identifier, not user authentication. Duplicate HTTP
+creation keys are rejected. One runtime session owns exactly one emulator, with
+a bounded total number of devices. The operator adapter must keep an explicit
+**Pax session → runtime session** mapping; never follow whichever device was
+recently active. The private keyed MCP broker described below has its own
+trusted get-or-create path; no key-routing HTTP endpoint is added.
 
 The operator may use all ordinary actions plus:
 
@@ -74,9 +76,10 @@ base64. This cannot detect visual changes occurring inside the app after capture
 ## Session endpoints and MCP
 
 Each session gets a random credential stored privately in
-`DATA/secrets/sessions/:id.json`; disk state stores its hash. The MCP launcher
-reads that file with `AGENT_MOBILE_SESSION_FILE`. A session credential cannot call
-operator endpoints or access a different session.
+`DATA/secrets/sessions/:id.json`; disk state stores its hash. A fixed-session MCP
+launcher reads that file with `AGENT_MOBILE_SESSION_FILE`, then authenticates to
+the same-account private broker. A session credential cannot call operator
+endpoints or access a different session.
 
 | Method / path | Result |
 | --- | --- |
@@ -90,6 +93,36 @@ Ordinary actions: `state`, `start`, `stop`, `snapshot`, `screenshot`, `tap`,
 advertised as MCP tools. Unknown arguments, device selectors and arbitrary
 commands are rejected. MCP additionally provides `mobile_recording_read` for
 completed artifacts up to 8 MiB; it returns audio or an embedded binary resource.
+
+### Keyed MCP launchers
+
+The local `mcp` launcher can also take an opaque `AGENT_MOBILE_SESSION_KEY`
+instead of a fixed credential-file reference. The private broker allocates or
+resumes one phone for that key and binds all subsequent MCP tools to its session
+ID. `AGENT_MOBILE_TEMPLATE` selects the template, or can be omitted when only
+one template is configured. Without a key or credential file, the launcher gets
+a random key and a fresh phone. Do not combine both launch modes.
+
+The broker's Unix socket is owner-only (0600) inside a same-account private
+directory (0700). This OS access authorizes trusted local launchers; the key is
+not a bearer token, browser identity or replacement for Manager ownership
+checks. Administrator credentials are not placed in the client config or model
+context. The service must be running even for MCP initialization.
+
+Different keys can operate separate phones concurrently. Each phone permits
+one active MCP connection, including fixed/keyed attempts to reach the same
+phone. Attachment allocates private disk data; the Agent uses `mobile_start`
+for the potentially long Android boot. Auto-owned phones are retained after
+idle disconnect for `mcpGraceMs` (default 300000), then safely stopped and
+destroyed. Pending-request disconnects retire them without replay. Persistent
+operator-created phones are not auto-expired. See [sessions.md](sessions.md)
+for recovery, capacity and retention details.
+
+A Pax node launcher that expands its local launch templates can inject
+`AGENT_MOBILE_SESSION_KEY="${PAX_SESSION_KEY}"` for the logical Pax session. The
+placeholder must actually be expanded by the trusted launcher; do not use that
+literal value in a shared static MCP config. This path does not add Manager or
+Console operations and does not automatically change companion Pax repositories.
 
 `snapshot` returns `{xml,width,height}`. Agent screenshots return PNG content.
 Text is limited to printable ASCII (literal `%s` unsupported). A recording start

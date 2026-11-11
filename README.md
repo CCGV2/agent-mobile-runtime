@@ -10,6 +10,7 @@
 | 安装、创建第一台手机、给 Agent 接入 MCP | [Quickstart](docs/quickstart.md)；统一入口 `node scripts/setup.cjs --help` |
 | Linux 私有 SDK 安装、KVM 和部署检查 | [Linux](docs/linux.md) |
 | macOS SDK、独立模板和配置准备 | [macOS](docs/macos.md) |
+| 多 Agent 并发、按 session key 分配手机、断线重连 | [会话与并发](docs/sessions.md) |
 | Agent 操作 App、截图、读取 UI、录音录像 | [Quickstart 的 MCP 使用流程](docs/quickstart.md) |
 | 人工查看实时画面与内部声音 | [WebRTC](docs/webrtc.md) |
 | 接到自己的前端或 Pax 节点 | [本地 API / Pax 接入协议](docs/pax-api.md) |
@@ -20,6 +21,7 @@
 ## 已实现
 
 - 每会话一个服务拥有的模拟器：创建、启动、就绪检查、停止、恢复、销毁。
+- MCP 启动时按 session key 自动分配或找回手机；不同 key 并发隔离，同一手机只允许一个活跃 MCP 连接。
 - 从显式配置的干净 AVD 模板复制私有数据，拒绝符号链接和外部可写磁盘路径；不连接真实手机、不导入用户原有账号。
 - 私有 ADB 服务端口与 Android HOME；子进程不继承宿主机凭证环境。
 - UI XML、截图、点击、滑动、导航键、输入、启动和列出 App。第一版输入仅支持可打印 ASCII。
@@ -62,21 +64,30 @@ node bin/agent-mobile.cjs --config /absolute/config.json serve
 
 `doctor` 返回 `ready:false` 时退出码为 2，不会伪报可用。服务只监听 `127.0.0.1:7341`，默认 ADB 服务端口为 5038，与日常使用的默认端口分开。
 
-另开终端创建、启动设备。下面的 `SESSION_ID` 用创建结果中的 `id` 替换：
+另开终端生成按 key 分配手机的 MCP 配置，合并到客户端已有配置并重连：
 
 ```sh
-node bin/agent-mobile.cjs --config /absolute/config.json session create --template clean35 --key my-task
-node bin/agent-mobile.cjs --config /absolute/config.json session start SESSION_ID
-node bin/agent-mobile.cjs --config /absolute/config.json install SESSION_ID --apk /absolute/app.apk
+node bin/agent-mobile.cjs --config /absolute/config.json mcp-config --template clean35
 ```
 
-创建结果里的 `credentialFile` 是给 MCP 进程读取的私有文件路径，**不是让模型读取其内容**。运行下面的命令生成可合并到 MCP 客户端的配置（绝对 Node 路径、CLI 路径及凭证文件引用，不含 token），合并时保留客户端已有的配置：
+可信启动器通过 `AGENT_MOBILE_SESSION_KEY` 传入每个逻辑任务的 key。不同 key 得到独立手机；相同 key 可在保留期内找回原来的 App 数据。不传 key 时每次连接分配随机 key，不要在所有 Agent 的全局配置中写同一个固定 key。模板也可通过 `AGENT_MOBILE_TEMPLATE` 指定；只配置一个模板时可省略。
+
+MCP 初始化只分配私有设备，实际开机由 Agent 调用 `mobile_start` 完成，避免首次启动阻塞 MCP 初始化。随后可调用 `mobile_apps`、`mobile_launch_app`、`mobile_screenshot`。服务必须持续运行，控制 HTTP 地址不是 MCP 地址。
+
+自动分配的手机在空闲断线后默认保留五分钟，再安全停止并销毁；有工具请求未完成时断线会退休该手机，等待确认清理，不重放操作。普通操作员创建的手机不会自动过期。详见 [会话与并发](docs/sessions.md)。
+
+新安装默认 `maxDevices:2`，可配置 1–8；旧安装的配置不会自动改写。停止和等待回收的设备也占名额，直到销毁。这是软件容量限制，不代表所有主机都完成了同数量模拟器的性能验收。
+
+需要保留操作员创建的固定手机时，仍可使用：
 
 ```sh
+node bin/agent-mobile.cjs --config /absolute/config.json session create --template clean35 --key persistent-task
+node bin/agent-mobile.cjs --config /absolute/config.json session start SESSION_ID
+node bin/agent-mobile.cjs --config /absolute/config.json install SESSION_ID --apk /absolute/app.apk
 node bin/agent-mobile.cjs --config /absolute/config.json mcp-config SESSION_ID
 ```
 
-手工配置参考 [examples/mcp.json](examples/mcp.json)。一个 MCP 连接固定绑定该会话，没有任意切换设备的工具。
+`SESSION_ID` 用创建结果中的 `id` 替换。`credentialFile` 由 MCP 进程读取，**不是让模型读取其内容**。生成器输出绝对 Node/CLI/配置路径和凭证文件引用，不输出 token，也不覆盖客户端配置。固定模式不要同时设置 session key。手工配置参考 [按 key 分配](examples/mcp-keyed.json) 和 [固定手机](examples/mcp.json)。一个 MCP 连接绑定一台手机，没有任意切换设备的工具。
 
 普通 Agent 会话与管理员共享同一个 OS 用户时，这些权限不是防止 Agent 通过 shell 绕过的安全边界。需要限制 Agent 的宿主 shell/文件访问，或使用独立服务账号/远程机器。
 
@@ -94,7 +105,7 @@ node bin/agent-mobile.cjs --config /absolute/config.json session destroy SESSION
 
 Agent 可通过 `mobile_recording_read` 读取不超过 8 MiB 的已完成文件；较大文件由操作员使用鉴权 artifact API 下载。MKV/Opus 并非所有浏览器都能直接播放。本机实时画面和声音可显式启用 [WebRTC](docs/webrtc.md)；Pax 的截图、控制和录制文件桥接见[接入协议](docs/pax-api.md)，远程 WebRTC 尚未实现。
 
-停止保留 App 数据、录制和凭证；销毁撤销凭证并删除整台设备的私有目录（包括 SD 卡和录像）。容量限制是应用级检查，可能短暂超出，不是 OS 磁盘配额。审计需要操作员按部署需求轮转。
+停止保留 App 数据、录制和凭证，但不会取消自动分配手机的断线回收策略；销毁撤销凭证并删除整台设备的私有目录（包括 SD 卡和录像）。需要长期保留时使用操作员创建的固定手机。容量限制是应用级检查，可能短暂超出，不是 OS 磁盘配额。审计需要操作员按部署需求轮转。
 
 ## 本地查看页面
 

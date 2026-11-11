@@ -23,6 +23,7 @@ async function loadConfig(filename = configPath(), overrides = {}) {
     scrcpyPath: 'scrcpy', ffmpegPath: 'ffmpeg', ffprobePath: 'ffprobe',
     controlPort: 7341, adbServerPort: 5038, emulatorPortStart: 5554,
     maxDevices: 2, headless: true,
+    mcpGraceMs: 300000,
     bootTimeoutMs: 180000, stopTimeoutMs: 15000,
     mediaMaxDurationSec: 300, mediaMaxBytes: 256 * 1024 * 1024,
     mediaStopTimeoutMs: 5000, artifactMaxBytes: 256 * 1024 * 1024,
@@ -61,6 +62,7 @@ async function loadConfig(filename = configPath(), overrides = {}) {
   for (const [key, min, max] of [
     ['controlPort', 1024, 65535], ['adbServerPort', 1024, 65535], ['emulatorPortStart', 5554, 5680],
     ['maxDevices', 1, 8], ['bootTimeoutMs', 100, 600000], ['stopTimeoutMs', 100, 60000],
+    ['mcpGraceMs', 0, 3600000],
     ['mediaMaxDurationSec', 1, 3600], ['mediaMaxBytes', 1024, 1024 ** 3],
     ['mediaStopTimeoutMs', 10, 60000], ['artifactMaxBytes', 1024, 1024 ** 3],
   ]) {

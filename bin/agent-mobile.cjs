@@ -11,7 +11,8 @@ const {MediaManager} = require('../src/media.cjs');
 const {MobileRuntime, alive, identifier} = require('../src/runtime.cjs');
 const {createServer} = require('../src/server.cjs');
 const {ControlClient} = require('../src/client.cjs');
-const {serveMCP} = require('../src/mcp.cjs');
+const {createMCPBroker, clearStaleBroker} = require('../src/mcp-broker.cjs');
+const {runBrokerMCP} = require('../src/mcp-broker-client.cjs');
 const {doctor} = require('../src/doctor.cjs');
 const {execFile} = require('node:child_process');
 const {promisify} = require('node:util');
@@ -34,9 +35,14 @@ const HELP = `agent-mobile-runtime (Node.js 22+)
   agent-mobile [--config ...] record stop ID --id RECORDING_ID
   agent-mobile [--config ...] record list ID
   agent-mobile [--config ...] mcp
-  agent-mobile [--config ...] mcp-config SESSION_ID
+  agent-mobile [--config ...] mcp-config [SESSION_ID | --template NAME]
 
-MCP requires AGENT_MOBILE_SESSION_FILE from operator session creation.
+MCP connects to the running service's private local broker.
+Set AGENT_MOBILE_SESSION_KEY per task to allocate/reuse an isolated device;
+without a key each connection gets a fresh one. Set AGENT_MOBILE_TEMPLATE if
+multiple templates are configured. Keyed allocation does not boot Android;
+use mobile_start. Alternatively set AGENT_MOBILE_SESSION_FILE for a fixed,
+operator-created session. Keys route sessions; they are not authentication.
 No credential contents are printed. No Android SDK is downloaded automatically.
 MCP config prints a mergeable JSON fragment with absolute paths, never tokens.
 See AGENTS.md and docs/quickstart.md for installation and first use.
@@ -63,9 +69,18 @@ async function serve(config) {
   const webrtc = config.webrtc.enabled ? new WebRTCManager({config, resolveAccess: device => resolveEmulatorGrpc({config, device, env: backend._env(device)})}) : null;
   const runtime = await new MobileRuntime({config, provisioner, backend, media: new MediaManager({config}), webrtc}).init();
   const server = createServer({runtime, provisioner});
+  const broker = createMCPBroker({runtime, config});
   try {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.controlPort, '127.0.0.1', resolve); });
-  } catch (error) { await runtime.close(); throw error; }
+    await broker.listen();
+  } catch (error) {
+    const brokerClosed = broker.close();
+    server.closeAllConnections();
+    const httpClosed = server.listening ? new Promise(resolve => server.close(resolve)) : Promise.resolve();
+    await runtime.close().catch(() => {});
+    await Promise.allSettled([brokerClosed, httpClosed]);
+    throw error;
+  }
   process.stderr.write(`Mobile runtime listening on http://127.0.0.1:${config.controlPort} (protocol v1).\n`);
   let stopping = false;
   async function shutdown() {
@@ -73,9 +88,11 @@ async function serve(config) {
     stopping = true;
     const closed = new Promise(resolve => server.close(resolve));
     server.closeAllConnections();
-    try { await runtime.close(); }
-    catch { process.stderr.write('Some devices require explicit recovery; inspect session state before restarting.\n'); process.exitCode = 1; }
-    await closed;
+    const brokerClosed = broker.close();
+    const results = await Promise.allSettled([runtime.close(), brokerClosed, closed]);
+    if (results.some(result => result.status === 'rejected')) {
+      process.stderr.write('Some devices require explicit recovery; inspect session state before restarting.\n'); process.exitCode = 1;
+    }
   }
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
@@ -87,8 +104,8 @@ async function main(argv = process.argv.slice(2)) {
   const config = await loadConfig(options.config);
   const [command, sub, rawID] = words;
   if (command === 'mcp-config') {
-    if (words.length !== 2) throw new Error('Use mcp-config SESSION_ID.');
-    const fragment = await createMCPConfig({config, configFile: options.config || configPath(), sessionId: sub});
+    if (words.length > 2 || Object.keys(options).some(key => !['config', 'template'].includes(key))) throw new Error('Use mcp-config [SESSION_ID | --template NAME].');
+    const fragment = await createMCPConfig({config, configFile: options.config || configPath(), sessionId: sub, template: options.template});
     process.stdout.write(JSON.stringify(fragment, null, 2)+'\n');
     return;
   }
@@ -100,15 +117,19 @@ async function main(argv = process.argv.slice(2)) {
   }
   if (command === 'serve') return serve(config);
   if (command === 'mcp') {
-    const filename = process.env.AGENT_MOBILE_SESSION_FILE;
-    if (!filename || !path.isAbsolute(filename)) throw new Error('Set AGENT_MOBILE_SESSION_FILE to the operator-created private session credential file.');
-    const client = await ControlClient.session(config, filename);
-    serveMCP({client}); return;
+    if (words.length !== 1 || Object.keys(options).some(key => key !== 'config')) throw new Error('Use mcp with --config and the documented session environment.');
+    const credentialFile = process.env.AGENT_MOBILE_SESSION_FILE || undefined;
+    const sessionKey = process.env.AGENT_MOBILE_SESSION_KEY || undefined;
+    if (credentialFile && sessionKey) throw new Error('Choose AGENT_MOBILE_SESSION_FILE or AGENT_MOBILE_SESSION_KEY, not both.');
+    await runBrokerMCP({config, credentialFile, sessionKey,
+      template: credentialFile ? undefined : process.env.AGENT_MOBILE_TEMPLATE || undefined});
+    return;
   }
   if (command === 'unlock') {
     const lock = path.join(config.dataDir, 'service.lock');
     const value = JSON.parse(await readPrivate(lock));
     if (!Number.isSafeInteger(value.pid) || value.pid < 1 || alive(value.pid)) throw new Error('Service lock may still be active; refusing to remove it.');
+    await clearStaleBroker(config);
     await fs.unlink(lock);
     process.stdout.write('Removed a dead service lock. Interrupted devices still require reconciliation.\n'); return;
   }

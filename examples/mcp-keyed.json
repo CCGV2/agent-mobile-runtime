@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "agent-mobile": {
+      "command": "/absolute/path/to/node",
+      "args": ["/absolute/path/to/agent-mobile-runtime/bin/agent-mobile.cjs", "--config", "/absolute/path/to/config.json", "mcp"],
+      "env": {
+        "AGENT_MOBILE_TEMPLATE": "clean35"
+      }
+    }
+  }
+}
