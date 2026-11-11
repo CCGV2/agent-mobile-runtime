@@ -9,6 +9,7 @@ third-party dependencies.
 
 | Task | Read |
 | --- | --- |
+| Prepare a phone when asked by a user or Console | [Agent preparation playbook](docs/agent-preparation.md) |
 | Install, start a device, connect an MCP client | [Quickstart](docs/quickstart.md) |
 | Fresh Linux SDK installation and KVM troubleshooting | [Linux setup](docs/linux.md) |
 | Prepare macOS using an installed SDK | [macOS setup](docs/macos.md) |

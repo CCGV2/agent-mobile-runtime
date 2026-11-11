@@ -5,6 +5,7 @@
 > Standalone; no npm third-party dependencies. Start with the quickstart.
 
 - [Agent quickstart](docs/quickstart.md): Clone, choose an OS setup route, check readiness, generate a keyed MCP entry and start the assigned phone.
+- [Agent preparation](docs/agent-preparation.md): Inspect and prepare a phone for a user/Console request, verify actual readiness, and report the assigned device without exposing credentials.
 - [Agent instructions](AGENTS.md): Task-to-doc index, device-use rules and contributor checks.
 - [Sessions and concurrency](docs/sessions.md): Per-task keys, private concurrent phones, reconnects, exclusive MCP attachment and cleanup.
 - [README](README.md): Capabilities, operator CLI and limitations.
